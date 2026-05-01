@@ -495,9 +495,9 @@ let analysisMode='cat';
 // ---- FIREBASE CONFIG ----
 // Cole aqui suas credenciais do Firebase
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCzx0cvx2ydUUoJpeKWuoR7LKZY-rlugTg",
-  authDomain: "financas-coio.firebaseapp.com",
-  projectId: "financas-coio",
+  apiKey: "COLE_AQUI",
+  authDomain: "COLE_AQUI.firebaseapp.com",
+  projectId: "COLE_AQUI",
 };
 
 let _db = null;
@@ -552,7 +552,9 @@ function save() {
 // ---- AUTH GOOGLE ----
 function signIn() {
   const provider = new firebase.auth.GoogleAuthProvider();
-  _auth.signInWithRedirect(provider);
+  _auth.signInWithPopup(provider).catch(e => {
+    document.getElementById('login-error').textContent = 'Erro no login: ' + e.message;
+  });
 }
 
 function logout() {
@@ -570,13 +572,6 @@ async function initApp() {
   }
   _auth = firebase.auth();
   _db = firebase.firestore();
-
-  // Aguarda resultado de redirect (se voltou do login Google)
-  try {
-    await _auth.getRedirectResult();
-  } catch(e) {
-    console.error('Redirect error:', e);
-  }
 
   // Observa estado de autenticação
   _auth.onAuthStateChanged(async (user) => {
