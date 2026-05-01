@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <title>Finanças</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -490,17 +493,17 @@ let addCatSelected='';
 let analysisMode='cat';
 
 // ---- FIREBASE CONFIG ----
-// Substitua os valores abaixo pelas suas credenciais do Firebase
+// Cole aqui suas credenciais do Firebase
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCzx0cvx2ydUUoJpeKWuoR7LKZY-rlugTg",
-  projectId: "financas-coio",
+  apiKey: "COLE_AQUI",
+  authDomain: "COLE_AQUI.firebaseapp.com",
+  projectId: "COLE_AQUI",
 };
-const DB_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/financas/dados`;
 
+let _db = null;
+let _auth = null;
 let S = defaultState();
 let _saveTimer = null;
-let _fbToken = null;
-let _user = null;
 
 function defaultState(){
   const now = new Date();
@@ -513,71 +516,30 @@ function defaultState(){
   };
 }
 
-// Converte objeto JS → formato Firestore
-function toFirestore(obj) {
-  if (obj === null) return {nullValue: null};
-  if (typeof obj === 'boolean') return {booleanValue: obj};
-  if (typeof obj === 'number') return {doubleValue: obj};
-  if (typeof obj === 'string') return {stringValue: obj};
-  if (Array.isArray(obj)) return {arrayValue: {values: obj.map(toFirestore)}};
-  if (typeof obj === 'object') {
-    const fields = {};
-    for (const k in obj) fields[k] = toFirestore(obj[k]);
-    return {mapValue: {fields}};
-  }
-  return {stringValue: String(obj)};
-}
-
-// Converte formato Firestore → objeto JS
-function fromFirestore(val) {
-  if (!val) return null;
-  if ('nullValue' in val) return null;
-  if ('booleanValue' in val) return val.booleanValue;
-  if ('integerValue' in val) return Number(val.integerValue);
-  if ('doubleValue' in val) return val.doubleValue;
-  if ('stringValue' in val) return val.stringValue;
-  if ('arrayValue' in val) return (val.arrayValue.values || []).map(fromFirestore);
-  if ('mapValue' in val) {
-    const obj = {};
-    for (const k in (val.mapValue.fields || {})) obj[k] = fromFirestore(val.mapValue.fields[k]);
-    return obj;
-  }
-  return null;
+function setStatus(msg, color) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color === 'green' ? 'var(--green)' : color === 'red' ? 'var(--red)' : 'var(--text2)';
+  if (color === 'green') setTimeout(() => { el.textContent = ''; }, 3000);
 }
 
 async function fbGet() {
-  const res = await fetch(DB_URL, {
-    headers: { 'Authorization': 'Bearer ' + _fbToken }
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Erro ao carregar dados: ' + res.status);
-  const doc = await res.json();
-  const fields = doc.fields || {};
-  const obj = {};
-  for (const k in fields) obj[k] = fromFirestore(fields[k]);
-  return obj.data ? JSON.parse(obj.data.stringValue || obj.data) : null;
+  const doc = await _db.collection('financas').doc('dados').get();
+  if (!doc.exists) return null;
+  const raw = doc.data().data;
+  return raw ? JSON.parse(raw) : null;
 }
 
 async function fbSet(data) {
-  const body = { fields: { data: { stringValue: JSON.stringify(data) } } };
-  const res = await fetch(DB_URL + '?updateMask.fieldPaths=data', {
-    method: 'PATCH',
-    headers: {
-      'Authorization': 'Bearer ' + _fbToken,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error('Erro ao salvar: ' + res.status);
+  await _db.collection('financas').doc('dados').set({ data: JSON.stringify(data) });
 }
 
 function save() {
-  // Salva localmente imediatamente
   try { localStorage.setItem('fin2_cache', JSON.stringify(S)); } catch(e){}
-  // Debounce para Firebase: aguarda 1s após última alteração
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    if (!_fbToken) return;
+    if (!_db) return;
     try {
       await fbSet(S);
       setStatus('✓ Salvo', 'green');
@@ -587,105 +549,69 @@ function save() {
   }, 1000);
 }
 
-function setStatus(msg, color) {
-  const el = document.getElementById('sync-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = color === 'green' ? 'var(--green)' : color === 'red' ? 'var(--red)' : 'var(--text2)';
-  if (color === 'green') setTimeout(() => { el.textContent = ''; }, 3000);
-}
-
 // ---- AUTH GOOGLE ----
 function signIn() {
-  const clientId = FIREBASE_CONFIG.apiKey; // reutilizamos o campo, veja tutorial
-  // Abre popup de login Google via Firebase Auth REST
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${encodeURIComponent(FIREBASE_CONFIG.clientId)}&` +
-    `redirect_uri=${encodeURIComponent(location.origin + location.pathname)}&` +
-    `response_type=token&` +
-    `scope=email%20profile&` +
-    `prompt=select_account`;
-  location.href = authUrl;
+  const provider = new firebase.auth.GoogleAuthProvider();
+  _auth.signInWithRedirect(provider);
 }
 
-async function exchangeGoogleToken(googleToken) {
-  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FIREBASE_CONFIG.apiKey}`, {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      postBody: `access_token=${googleToken}&providerId=google.com`,
-      requestUri: location.origin + location.pathname,
-      returnIdpCredential: true,
-      returnSecureToken: true
-    })
-  });
-  const data = await res.json();
-  return data;
+function logout() {
+  _auth.signOut();
 }
 
 async function initApp() {
-  showPage('home');
   document.getElementById('app-loading').style.display = 'flex';
   document.getElementById('app-content').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'none';
 
-  // Verifica se voltou de redirect OAuth
-  const hash = new URLSearchParams(location.hash.replace('#',''));
-  const accessToken = hash.get('access_token');
-
-  if (accessToken) {
-    history.replaceState(null, '', location.pathname);
-    try {
-      setStatus('🔄 Autenticando…', 'gray');
-      const auth = await exchangeGoogleToken(accessToken);
-      _fbToken = auth.idToken;
-      _user = { name: auth.displayName, email: auth.email };
-      localStorage.setItem('fb_token', _fbToken);
-      localStorage.setItem('fb_user', JSON.stringify(_user));
-      localStorage.setItem('fb_token_time', Date.now());
-    } catch(e) {
-      showLoginScreen('Erro no login. Tente novamente.');
-      return;
-    }
-  } else {
-    // Tenta token salvo (válido por ~1h)
-    const saved = localStorage.getItem('fb_token');
-    const savedTime = localStorage.getItem('fb_token_time');
-    if (saved && savedTime && (Date.now() - Number(savedTime)) < 55 * 60 * 1000) {
-      _fbToken = saved;
-      _user = JSON.parse(localStorage.getItem('fb_user') || '{}');
-    } else {
-      // Sem token válido: mostra tela de login
-      showLoginScreen();
-      return;
-    }
+  // Inicializa Firebase
+  if (!firebase.apps.length) {
+    firebase.initializeApp(FIREBASE_CONFIG);
   }
+  _auth = firebase.auth();
+  _db = firebase.firestore();
 
-  // Carrega dados do Firebase
+  // Aguarda resultado de redirect (se voltou do login Google)
   try {
-    setStatus('🔄 Carregando…', 'gray');
-    const data = await fbGet();
-    if (data) {
-      S = data;
-    } else {
-      // Primeiro acesso: verifica se tem cache local
-      const cache = localStorage.getItem('fin2_cache') || localStorage.getItem('fin2');
-      if (cache) {
-        S = JSON.parse(cache);
-        await fbSet(S); // sobe o cache para nuvem
-      }
-    }
-    setStatus('✓ Online', 'green');
+    await _auth.getRedirectResult();
   } catch(e) {
-    // Offline: usa cache local
-    const cache = localStorage.getItem('fin2_cache') || localStorage.getItem('fin2');
-    if (cache) { try { S = JSON.parse(cache); } catch(e2){} }
-    setStatus('⚠ Offline (cache local)', 'red');
+    console.error('Redirect error:', e);
   }
 
-  document.getElementById('app-loading').style.display = 'none';
-  document.getElementById('app-content').style.display = 'flex';
-  renderAdd();
-  renderHome();
+  // Observa estado de autenticação
+  _auth.onAuthStateChanged(async (user) => {
+    if (!user) {
+      document.getElementById('app-loading').style.display = 'none';
+      document.getElementById('login-screen').style.display = 'flex';
+      return;
+    }
+
+    // Usuário logado — carrega dados
+    setStatus('🔄 Carregando…', 'gray');
+    try {
+      const data = await fbGet();
+      if (data) {
+        S = data;
+      } else {
+        const cache = localStorage.getItem('fin2_cache') || localStorage.getItem('fin2');
+        if (cache) {
+          S = JSON.parse(cache);
+          await fbSet(S);
+        }
+      }
+      setStatus('✓ Online', 'green');
+    } catch(e) {
+      const cache = localStorage.getItem('fin2_cache') || localStorage.getItem('fin2');
+      if (cache) { try { S = JSON.parse(cache); } catch(e2){} }
+      setStatus('⚠ Offline (cache local)', 'red');
+    }
+
+    document.getElementById('app-loading').style.display = 'none';
+    document.getElementById('app-content').style.display = 'flex';
+    showPage('home');
+    renderAdd();
+    renderHome();
+  });
 }
 
 function showLoginScreen(msg) {
@@ -693,15 +619,6 @@ function showLoginScreen(msg) {
   document.getElementById('app-content').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   if (msg) document.getElementById('login-error').textContent = msg;
-}
-
-function logout() {
-  localStorage.removeItem('fb_token');
-  localStorage.removeItem('fb_user');
-  localStorage.removeItem('fb_token_time');
-  _fbToken = null;
-  _user = null;
-  showLoginScreen();
 }
 
 function getMonth(y,m){
@@ -1398,10 +1315,6 @@ function closeModal(){document.getElementById('overlay').classList.remove('open'
 function closeModalBg(e){if(e.target===document.getElementById('overlay'))closeModal();}
 
 // ---- INIT ----
-// Configuração do clientId Google OAuth (separado do apiKey)
-// Veja o tutorial: adicione seu clientId abaixo
-FIREBASE_CONFIG.clientId = "89416849398-83tf0rojl0ucnhpnrqscb7n5eg7deelv.apps.googleusercontent.com";
-
 window.addEventListener('load', initApp);
 </script>
 </div><!-- /app-content -->
