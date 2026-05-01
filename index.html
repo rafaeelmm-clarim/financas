@@ -179,7 +179,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
 </div>
 
 <!-- App Principal -->
-<div id="app-content" style="display:none;flex-direction:column;width:100%;min-height:100dvh">
+<div id="app-content" style="display:none">
 <div class="app">
 
 <nav class="nav">
@@ -499,6 +499,7 @@ const FIREBASE_CONFIG = {
   authDomain: "financas-coio.firebaseapp.com",
   projectId: "financas-coio",
 };
+
 let _db = null;
 let _auth = null;
 let S = defaultState();
@@ -601,7 +602,7 @@ async function initApp() {
     }
 
     document.getElementById('app-loading').style.display = 'none';
-    document.getElementById('app-content').style.display = 'flex';
+    document.getElementById('app-content').style.display = 'block';
     showPage('home');
     renderAdd();
     renderHome();
