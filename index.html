@@ -631,19 +631,26 @@ function cmd(){return getMonth(S.year,S.month);}
 function fmt(v){return(v<0?'- ':'')+'R$ '+Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
 function getWeeks(y,m){
-  const weeks=[];let d=new Date(y,m,1);
-  while(d.getMonth()===m){
-    const s=new Date(d),e=new Date(d);e.setDate(s.getDate()+6);
-    if(e.getMonth()!==m)e.setDate(new Date(y,m+1,0).getDate());
-    weeks.push({s:new Date(s),e:new Date(e)});d.setDate(d.getDate()+7);
+  // Encontra a primeira segunda-feira do mês
+  const firstDay=new Date(y,m,1);
+  const dow=firstDay.getDay(); // 0=dom,1=seg,...
+  const daysToMon=dow===1?0:(dow===0?1:(8-dow));
+  const firstMon=new Date(y,m,1+daysToMon);
+  const n=getMonth(y,m).weeks||4;
+  const weeks=[];
+  for(let i=0;i<n;i++){
+    const s=new Date(firstMon);s.setDate(firstMon.getDate()+i*7);
+    const e=new Date(s);e.setDate(s.getDate()+6);
+    weeks.push({s,e});
   }
   return weeks;
 }
 function curWeekIdx(y,m){
   const now=new Date();
-  if(now.getFullYear()!==y||now.getMonth()!==m)return 0;
   const w=getWeeks(y,m);
   for(let i=0;i<w.length;i++)if(now>=w[i].s&&now<=w[i].e)return i;
+  // se antes da primeira semana, retorna 0; se depois da última, retorna última
+  if(now<w[0].s)return 0;
   return w.length-1;
 }
 function instForMonth(y,m){
@@ -861,7 +868,12 @@ function saveExpense(){
       payments.push({mk:`${ay}-${String(adjm+1).padStart(2,'0')}`,v:i===0?(value-(pv*(n-1))):pv});
     }
     S.installments.push({id:'inst_'+Date.now(),desc,cat,total:n,payments});
-    md.expenses.push({id:'e'+Date.now(),value,desc:`${desc} (parcelado ${n}x)`,cat,date});
+    // só registra gasto no mês atual se a 1ª parcela for o mês atual ou futuro
+    const curMk=`${S.year}-${String(S.month+1).padStart(2,'0')}`;
+    const firstFuture=payments.find(p=>p.mk>=curMk);
+    if(firstFuture&&firstFuture.mk===curMk){
+      md.expenses.push({id:'e'+Date.now(),value:firstFuture.v,desc:`${desc} (1/${n})`,cat,date});
+    }
   } else {
     md.expenses.push({id:'e'+Date.now(),value,desc,cat,date});
   }
@@ -1250,6 +1262,20 @@ function renderAnalysis(){
   }).join('');
 }
 
+function showBarDetail(title, rows, total){
+  const body=rows.map(({label,icon,value,pct,color})=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--border)">
+      <span style="width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0;display:inline-block"></span>
+      <span style="flex:1;font-size:14px">${icon} ${label}</span>
+      <span style="font-size:14px;font-weight:500">${fmt(value)}</span>
+      <span style="font-size:12px;color:var(--text2);min-width:36px;text-align:right">${pct}%</span>
+    </div>`).join('');
+  openModal(title,`
+    <div style="margin-bottom:12px;font-size:15px;font-weight:500">Total: ${fmt(total)}</div>
+    ${body}
+  `);
+}
+
 function renderCatAnalysis(months){
   const allCatIds=[...new Set(months.flatMap(({y,m})=>(getMonth(y,m).expenses||[]).map(e=>e.cat)))];
   const palette=CAT_COLORS;
@@ -1269,7 +1295,12 @@ function renderCatAnalysis(months){
       return`<div class="bar-seg" style="height:${h}px;background:${catColorMap[cid]||'#eee'}"></div>`;
     }).join('');
     const totalK=total>=1000?(total/1000).toFixed(1)+'k':Math.round(total);
-    return`<div class="bar-col">
+    const detailData=JSON.stringify(allCatIds.filter(cid=>exps.filter(e=>e.cat===cid).reduce((a,b)=>a+b.value,0)>0).map(cid=>{
+      const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
+      const v=exps.filter(e=>e.cat===cid).reduce((a,b)=>a+b.value,0);
+      return{label:c.name,icon:c.icon,value:v,pct:total>0?Math.round(v/total*100):0,color:catColorMap[cid]||'#eee'};
+    }).sort((a,b)=>b.value-a.value)).replace(/"/g,'&quot;');
+    return`<div class="bar-col" onclick="showBarDetail('${MONTHS[m].substring(0,3)} ${y} — Variáveis',JSON.parse(this.dataset.rows),${total})" data-rows="${detailData}" style="cursor:pointer">
       <div class="bar-total">${total>0?totalK:''}</div>
       <div class="bar-stack" style="height:${barH}px">${segs}</div>
       <div class="bar-label">${MONTHS[m].substring(0,3)}</div>
@@ -1302,22 +1333,34 @@ function renderFixedAnalysis(months){
       return`<div class="bar-seg" style="height:${h}px;background:${catColorMap[cid]||'#eee'}"></div>`;
     }).join('');
     const totalK=total>=1000?(total/1000).toFixed(1)+'k':Math.round(total);
-    return`<div class="bar-col"><div class="bar-total">${total>0?totalK:''}</div><div class="bar-stack" style="height:${barH}px">${segs}</div><div class="bar-label">${MONTHS[m].substring(0,3)}</div></div>`;
+    const detailData=JSON.stringify(allCatIds.filter(cid=>fixeds.filter(f=>f.cat===cid).reduce((a,b)=>a+b.value,0)>0).map(cid=>{
+      const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
+      const v=fixeds.filter(f=>f.cat===cid).reduce((a,b)=>a+b.value,0);
+      return{label:c.name,icon:c.icon,value:v,pct:total>0?Math.round(v/total*100):0,color:catColorMap[cid]||'#eee'};
+    }).sort((a,b)=>b.value-a.value)).replace(/"/g,'&quot;');
+    return`<div class="bar-col" onclick="showBarDetail('${MONTHS[m].substring(0,3)} ${y} — Fixas',JSON.parse(this.dataset.rows),${total})" data-rows="${detailData}" style="cursor:pointer">
+      <div class="bar-total">${total>0?totalK:''}</div>
+      <div class="bar-stack" style="height:${barH}px">${segs}</div>
+      <div class="bar-label">${MONTHS[m].substring(0,3)}</div>
+    </div>`;
   }).join('');
   const leg=document.getElementById('chart-legend');
   leg.innerHTML=allCatIds.map(cid=>{
     const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
     return`<span style="display:flex;align-items:center;gap:4px;font-size:12px"><span style="width:10px;height:10px;border-radius:2px;background:${catColorMap[cid]};display:inline-block"></span>${c.icon} ${c.name}</span>`;
   }).join('');
+  // Mês atual: breakdown por categoria com % da receita
   const sg=document.getElementById('analysis-stats');
   const curFixed=getMonth(S.year,S.month).fixed||[];
+  const {inn}=calcTotals(S.year,S.month);
   const byCat={};
   curFixed.forEach(f=>{byCat[f.cat]=(byCat[f.cat]||0)+f.value;});
-  const rows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cid,v])=>{
+  const statRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cid,v])=>{
     const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
-    return`<div class="stat"><div class="stat-label">${c.icon} ${c.name}</div><div class="stat-value">${fmt(v)}</div></div>`;
+    const pct=inn>0?Math.round(v/inn*100):0;
+    return`<div class="stat"><div class="stat-label">${c.icon} ${c.name}</div><div class="stat-value">${fmt(v)}<span style="font-size:11px;color:var(--text2);font-weight:400;margin-left:4px">${pct}%</span></div></div>`;
   }).join('');
-  sg.innerHTML=rows||'<div class="stat"><div class="stat-label">Sem fixas</div><div class="stat-value">—</div></div>';
+  sg.innerHTML=statRows||'<div class="stat"><div class="stat-label">Sem fixas</div><div class="stat-value">—</div></div>';
 }
 
 function renderTypeAnalysis(months){
@@ -1336,7 +1379,8 @@ function renderTypeAnalysis(months){
     const total=vals.reduce((a,b)=>a+b,0);
     const segs=vals.map((v,i)=>`<div class="bar-seg" style="height:${(v/maxVal*barH).toFixed(1)}px;background:${colors[i]}"></div>`).join('');
     const totalK=total>=1000?(total/1000).toFixed(1)+'k':Math.round(total);
-    return`<div class="bar-col">
+    const detailData=JSON.stringify(vals.map((v,i)=>({label:labels[i],icon:'',value:v,pct:total>0?Math.round(v/total*100):0,color:colors[i]})).filter(r=>r.value>0)).replace(/"/g,'&quot;');
+    return`<div class="bar-col" onclick="showBarDetail('${MONTHS[m].substring(0,3)} ${y} — Por tipo',JSON.parse(this.dataset.rows),${total})" data-rows="${detailData}" style="cursor:pointer">
       <div class="bar-total">${total>0?totalK:''}</div>
       <div class="bar-stack" style="height:${barH}px">${segs}</div>
       <div class="bar-label">${MONTHS[m].substring(0,3)}</div>
