@@ -249,6 +249,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Semanas do mês</div>
   <div id="weeks-home"></div>
 
+  <div id="caixinha-card"></div>
   <div class="section-title">Parcelas ativas</div>
   <div id="inst-home"></div>
 </div>
@@ -299,10 +300,11 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
       <button class="toggle" id="tog-inst" onclick="togInst()"><div class="toggle-thumb"></div></button>
     </div>
     <div id="inst-fields" style="display:none;margin-top:12px">
-      <div class="grid2" style="margin:0;gap:10px">
+      <div class="grid2" style="margin:0 0 10px;gap:10px">
         <div class="field" style="margin:0"><label>Nº de parcelas</label><input type="number" id="add-inst-n" placeholder="6" min="2" max="60"></div>
         <div class="field" style="margin:0"><label>Valor da parcela</label><input type="number" id="add-inst-v" placeholder="auto" step="0.01"></div>
       </div>
+      <div class="field" style="margin:0"><label>1ª parcela cai em</label><select id="add-inst-start"></select></div>
     </div>
   </div>
 
@@ -418,6 +420,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="seg-ctrl">
     <button class="seg-btn active" id="seg-cat" onclick="setAnalysisMode('cat')">Por categoria</button>
     <button class="seg-btn" id="seg-type" onclick="setAnalysisMode('type')">Por tipo</button>
+    <button class="seg-btn" id="seg-fixed" onclick="setAnalysisMode('fixed')">Fixas</button>
   </div>
 
   <div class="section-title">Histórico — últimos 6 meses</div>
@@ -723,6 +726,27 @@ function renderHome(){
     </div>`;
   });
 
+  // caixinha — gastos variáveis do mês anterior
+  const caixEl=document.getElementById('caixinha-card');
+  const prevM=m===0?11:m-1;
+  const prevY=m===0?y-1:y;
+  const prevMd=getMonth(prevY,prevM);
+  const prevSpent=(prevMd.expenses||[]).reduce((a,b)=>a+b.value,0);
+  if(prevSpent>0){
+    const prevLabel=MONTHS[prevM].substring(0,3)+' '+prevY;
+    caixEl.innerHTML=`<div class="card card-sm" style="border-color:var(--amber);background:var(--amber-bg);margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--amber-text)">Resgatar da caixinha</div>
+          <div style="font-size:12px;color:var(--amber-text);opacity:.8">Gastos variáveis de ${prevLabel}</div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--amber-text)">${fmt(prevSpent)}</div>
+      </div>
+    </div>`;
+  } else {
+    caixEl.innerHTML='';
+  }
+
   // installments
   const mk=`${y}-${String(m+1).padStart(2,'0')}`;
   const ai=S.installments.filter(i=>i.payments.some(p=>p.mk===mk));
@@ -730,10 +754,18 @@ function renderHome(){
   if(!ai.length){ih.innerHTML='<div class="empty">Nenhuma parcela ativa</div>';return;}
   ih.innerHTML='<div class="card card-sm">'+ai.map(inst=>{
     const pi=inst.payments.findIndex(p=>p.mk===mk);
-    return`<div class="row"><div><div class="row-name">${inst.desc}</div><div class="row-sub">${pi+1}/${inst.total} parcelas</div></div><div class="row-val">${fmt(inst.payments[pi].v)}</div></div>`;
+    return`<div class="row"><div style="flex:1"><div class="row-name">${inst.desc}</div><div class="row-sub">${pi+1}/${inst.total} parcelas • ${fmt(inst.payments[pi].v)}/mês</div></div><button class="row-action" style="color:var(--red);font-size:14px;padding:4px 8px" onclick="delInstallment('${inst.id}')">Excluir</button></div>`;
   }).join('')+'</div>';
 }
 function fd(d){return`${d.getDate()}/${d.getMonth()+1}`;}
+function delInstallment(id){
+  const inst=S.installments.find(i=>i.id===id);
+  if(!inst)return;
+  const remaining=inst.payments.length;
+  if(!confirm(`Excluir "${inst.desc}"?\nIsso vai remover todas as ${remaining} parcelas registradas.`))return;
+  S.installments=S.installments.filter(i=>i.id!==id);
+  save();renderHome();
+}
 function changeMonth(dir){
   S.month+=dir;
   if(S.month>11){S.month=0;S.year++;}
@@ -749,6 +781,9 @@ function renderAdd(){
   addCatSelected='';
   renderCatGrid();
   if(document.getElementById('tog-inst').classList.contains('on'))togInst();
+  document.getElementById('add-inst-n').value='';
+  document.getElementById('add-inst-v').value='';
+  populateInstStart();
 }
 function kp(k){
   if(k==='del'){KP_CENTS=Math.floor(KP_CENTS/10);}
@@ -766,7 +801,30 @@ function updDisplay(){
 }
 function togInst(){
   const t=document.getElementById('tog-inst'),f=document.getElementById('inst-fields');
-  t.classList.toggle('on');f.style.display=t.classList.contains('on')?'block':'none';
+  t.classList.toggle('on');
+  const on=t.classList.contains('on');
+  f.style.display=on?'block':'none';
+  if(on) populateInstStart();
+}
+function populateInstStart(){
+  const sel=document.getElementById('add-inst-start');
+  const MONTHS_PT=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  // default: next month after today
+  const today=new Date();
+  const defM=today.getMonth()+1; // next month (0-indexed +1 = next)
+  const defY=defM>11?today.getFullYear()+1:today.getFullYear();
+  const defAdjM=defM%12;
+  sel.innerHTML='';
+  for(let i=0;i<12;i++){
+    const m=(defAdjM+i)%12;
+    const y=defY+Math.floor((defAdjM+i)/12);
+    const val=`${y}-${String(m+1).padStart(2,'0')}`;
+    const label=`${MONTHS_PT[m]} ${y}`;
+    const opt=document.createElement('option');
+    opt.value=val;opt.textContent=label;
+    if(i===0)opt.selected=true;
+    sel.appendChild(opt);
+  }
 }
 function renderCatGrid(){
   const g=document.getElementById('cat-grid');
@@ -789,14 +847,17 @@ function saveExpense(){
     const n=parseInt(document.getElementById('add-inst-n').value)||0;
     if(n<2){alert('Mínimo 2 parcelas');return;}
     const pv=parseFloat(document.getElementById('add-inst-v').value)||(value/n);
-    const d=new Date(date+'T00:00:00');
+    const startMk=document.getElementById('add-inst-start').value;
+    const [sy,sm]=startMk.split('-').map(Number);
     const payments=[];
     for(let i=0;i<n;i++){
-      const am=d.getMonth()+i,ay=d.getFullYear()+Math.floor((d.getMonth()+i)/12),adjm=am%12;
+      const totalM=(sm-1)+i;
+      const ay=sy+Math.floor(totalM/12);
+      const adjm=totalM%12;
       payments.push({mk:`${ay}-${String(adjm+1).padStart(2,'0')}`,v:i===0?(value-(pv*(n-1))):pv});
     }
     S.installments.push({id:'inst_'+Date.now(),desc,cat,total:n,payments});
-    md.expenses.push({id:'e'+Date.now(),value:payments[0].v,desc:`${desc} (1/${n})`,cat,date});
+    md.expenses.push({id:'e'+Date.now(),value,desc:`${desc} (parcelado ${n}x)`,cat,date});
   } else {
     md.expenses.push({id:'e'+Date.now(),value,desc,cat,date});
   }
@@ -1136,6 +1197,7 @@ function setAnalysisMode(mode){
   analysisMode=mode;
   document.getElementById('seg-cat').classList.toggle('active',mode==='cat');
   document.getElementById('seg-type').classList.toggle('active',mode==='type');
+  document.getElementById('seg-fixed').classList.toggle('active',mode==='fixed');
   renderAnalysis();
 }
 
@@ -1149,6 +1211,7 @@ function renderAnalysis(){
   }
 
   if(analysisMode==='cat'){renderCatAnalysis(months);}
+  else if(analysisMode==='fixed'){renderFixedAnalysis(months);}
   else{renderTypeAnalysis(months);}
 
   // Current month stats
@@ -1216,6 +1279,41 @@ function renderCatAnalysis(months){
       <span style="width:10px;height:10px;border-radius:2px;background:${catColorMap[cid]};display:inline-block"></span>${c.icon} ${c.name}
     </span>`;
   }).join('');
+}
+
+function renderFixedAnalysis(months){
+  const allCatIds=[...new Set(months.flatMap(({y,m})=>(getMonth(y,m).fixed||[]).map(f=>f.cat).filter(Boolean)))];
+  const palette=CAT_COLORS;
+  const catColorMap={};
+  allCatIds.forEach((id,i)=>catColorMap[id]=palette[i%palette.length]);
+  const maxVal=Math.max(...months.map(({y,m})=>(getMonth(y,m).fixed||[]).reduce((a,b)=>a+b.value,0)),1);
+  const barH=120;
+  const bars=document.getElementById('chart-bars');
+  bars.innerHTML=months.map(({y,m})=>{
+    const fixeds=getMonth(y,m).fixed||[];
+    const total=fixeds.reduce((a,b)=>a+b.value,0);
+    const segs=allCatIds.map(cid=>{
+      const v=fixeds.filter(f=>f.cat===cid).reduce((a,b)=>a+b.value,0);
+      const h=(v/maxVal*barH).toFixed(1);
+      return`<div class="bar-seg" style="height:${h}px;background:${catColorMap[cid]||'#eee'}"></div>`;
+    }).join('');
+    const totalK=total>=1000?(total/1000).toFixed(1)+'k':Math.round(total);
+    return`<div class="bar-col"><div class="bar-total">${total>0?totalK:''}</div><div class="bar-stack" style="height:${barH}px">${segs}</div><div class="bar-label">${MONTHS[m].substring(0,3)}</div></div>`;
+  }).join('');
+  const leg=document.getElementById('chart-legend');
+  leg.innerHTML=allCatIds.map(cid=>{
+    const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
+    return`<span style="display:flex;align-items:center;gap:4px;font-size:12px"><span style="width:10px;height:10px;border-radius:2px;background:${catColorMap[cid]};display:inline-block"></span>${c.icon} ${c.name}</span>`;
+  }).join('');
+  const sg=document.getElementById('analysis-stats');
+  const curFixed=getMonth(S.year,S.month).fixed||[];
+  const byCat={};
+  curFixed.forEach(f=>{byCat[f.cat]=(byCat[f.cat]||0)+f.value;});
+  const rows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cid,v])=>{
+    const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
+    return`<div class="stat"><div class="stat-label">${c.icon} ${c.name}</div><div class="stat-value">${fmt(v)}</div></div>`;
+  }).join('');
+  sg.innerHTML=rows||'<div class="stat"><div class="stat-label">Sem fixas</div><div class="stat-value">—</div></div>';
 }
 
 function renderTypeAnalysis(months){
