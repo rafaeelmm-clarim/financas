@@ -217,16 +217,28 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
     <span class="badge b-green" id="month-status">Em andamento</span>
   </div>
 
-  <div class="card" style="margin-bottom:12px">
-    <div style="font-size:13px;color:var(--text2);margin-bottom:2px">Livre para gastar</div>
-    <div style="font-size:26px;font-weight:500" id="home-free">R$ 0</div>
-    <div style="font-size:12px;color:var(--text2);margin-top:2px" id="home-free-sub"></div>
+  <div class="card card-sm" style="margin-bottom:12px">
+    <div class="row" style="border:none;padding:4px 0">
+      <div class="row-name" style="color:var(--text2)">Entradas</div>
+      <div class="row-val" id="home-in">R$ 0</div>
+    </div>
+    <div class="divider"></div>
+    <div class="row" style="border:none;padding:4px 0">
+      <div class="row-name" style="color:var(--text2)">Fixas</div>
+      <div class="row-val" style="color:var(--red)" id="home-fixed">R$ 0</div>
+    </div>
+    <div class="row" style="border:none;padding:4px 0">
+      <div class="row-name" style="color:var(--text2)">Investimentos</div>
+      <div class="row-val" style="color:var(--amber)" id="home-inv">R$ 0</div>
+    </div>
+    <div class="row" style="border:none;padding:4px 0">
+      <div class="row-name" style="color:var(--text2)">Parcelas</div>
+      <div class="row-val" style="color:var(--red)" id="home-inst">R$ 0</div>
+    </div>
   </div>
 
-  <div class="grid2">
-    <div class="stat"><div class="stat-label">Entradas</div><div class="stat-value" id="home-in">R$ 0</div></div>
-    <div class="stat"><div class="stat-label">Comprometido</div><div class="stat-value" id="home-committed">R$ 0</div></div>
-  </div>
+  <div class="section-title">Fixas por categoria</div>
+  <div class="card card-sm" id="home-fixed-cats" style="margin-bottom:12px"></div>
 
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -249,7 +261,6 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Semanas do mês</div>
   <div id="weeks-home"></div>
 
-  <div id="caixinha-card"></div>
   <div class="section-title">Parcelas ativas</div>
   <div id="inst-home"></div>
 </div>
@@ -352,6 +363,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Parcelas ativas neste mês</div>
   <div class="card card-sm" id="plan-inst-list"></div>
 
+  <div id="caixinha-card"></div>
   <div class="section-title">Resumo</div>
   <div class="card">
     <div class="row"><div class="row-name" style="color:var(--text2)">Total entradas</div><div class="row-val" id="plan-r-in">R$ 0</div></div>
@@ -697,11 +709,21 @@ function renderHome(){
   st.className='badge '+(isCur?'b-green':'b-blue');
 
   const{inn,fixed,inv,inst,free,weekly}=calcTotals(y,m);
-  document.getElementById('home-free').textContent=fmt(free);
-  document.getElementById('home-free').style.color=free>=0?'var(--green)':'var(--red)';
-  document.getElementById('home-free-sub').textContent=`${fmt(fixed+inv+inst)} comprometidos de ${fmt(inn)}`;
   document.getElementById('home-in').textContent=fmt(inn);
-  document.getElementById('home-committed').textContent=fmt(fixed+inv+inst);
+  document.getElementById('home-fixed').textContent=fmt(fixed);
+  document.getElementById('home-inv').textContent=fmt(inv);
+  document.getElementById('home-inst').textContent=fmt(inst);
+
+  // fixas por categoria
+  const md2=getMonth(y,m);
+  const byCat={};
+  (md2.fixed||[]).forEach(f=>{byCat[f.cat]=(byCat[f.cat]||0)+f.value;});
+  const catRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cid,v])=>{
+    const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
+    const pct=inn>0?Math.round(v/inn*100):0;
+    return`<div class="row" style="border:none;padding:5px 0"><div class="row-name">${c.icon} ${c.name}</div><div style="display:flex;align-items:center;gap:8px"><span class="row-val">${fmt(v)}</span><span style="font-size:12px;color:var(--text2);min-width:32px;text-align:right">${pct}%</span></div></div>`;
+  }).join('');
+  document.getElementById('home-fixed-cats').innerHTML=catRows||'<div class="empty">Sem saídas fixas</div>';
 
   const wi=curWeekIdx(y,m),ws=getWeeks(y,m);
   const spent=weekExp(y,m,wi).reduce((a,b)=>a+b.value,0);
@@ -732,27 +754,6 @@ function renderHome(){
       <div class="progress-labels"><span>${fmt(s2)}</span><span>${fmt(weekly)}</span></div>
     </div>`;
   });
-
-  // caixinha — gastos variáveis do mês anterior
-  const caixEl=document.getElementById('caixinha-card');
-  const prevM=m===0?11:m-1;
-  const prevY=m===0?y-1:y;
-  const prevMd=getMonth(prevY,prevM);
-  const prevSpent=(prevMd.expenses||[]).reduce((a,b)=>a+b.value,0);
-  if(prevSpent>0){
-    const prevLabel=MONTHS[prevM].substring(0,3)+' '+prevY;
-    caixEl.innerHTML=`<div class="card card-sm" style="border-color:var(--amber);background:var(--amber-bg);margin-bottom:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:13px;font-weight:500;color:var(--amber-text)">Resgatar da caixinha</div>
-          <div style="font-size:12px;color:var(--amber-text);opacity:.8">Gastos variáveis de ${prevLabel}</div>
-        </div>
-        <div style="font-size:18px;font-weight:600;color:var(--amber-text)">${fmt(prevSpent)}</div>
-      </div>
-    </div>`;
-  } else {
-    caixEl.innerHTML='';
-  }
 
   // installments
   const mk=`${y}-${String(m+1).padStart(2,'0')}`;
@@ -1004,6 +1005,27 @@ function recalc(){
   document.getElementById('plan-r-inst').textContent=fmt(inst);
   const fe=document.getElementById('plan-r-free');fe.textContent=fmt(free);fe.style.color=free>=0?'var(--green)':'var(--red)';
   document.getElementById('plan-r-weekly').textContent=fmt(weekly);
+
+  // caixinha — gastos variáveis do mês anterior
+  const caixEl=document.getElementById('caixinha-card');
+  const prevM=y*12+m===0?11:(m===0?11:m-1);
+  const prevY2=m===0?y-1:y;
+  const prevMd=getMonth(prevY2,prevM);
+  const prevSpent=(prevMd.expenses||[]).reduce((a,b)=>a+b.value,0);
+  if(prevSpent>0){
+    const prevLabel=MONTHS[prevM].substring(0,3)+' '+prevY2;
+    caixEl.innerHTML=`<div class="card card-sm" style="border-color:var(--amber);margin-bottom:4px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:500">Resgatar da caixinha</div>
+          <div style="font-size:12px;color:var(--text2)">Gastos variáveis de ${prevLabel}</div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--amber)">${fmt(prevSpent)}</div>
+      </div>
+    </div>`;
+  } else {
+    caixEl.innerHTML='';
+  }
   save();
 }
 function editSalary(){
