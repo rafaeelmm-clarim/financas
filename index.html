@@ -808,22 +808,26 @@ function togInst(){
 }
 function populateInstStart(){
   const sel=document.getElementById('add-inst-start');
-  const MONTHS_PT=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  // default: next month after today
+  const MONTHS_PT=['Janeiro','Fevereiro','ço','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  // range: Oct/2025 até 12 meses à frente
+  const startFixed={y:2025,m:9}; // outubro = índice 9
   const today=new Date();
-  const defM=today.getMonth()+1; // next month (0-indexed +1 = next)
-  const defY=defM>11?today.getFullYear()+1:today.getFullYear();
-  const defAdjM=defM%12;
+  const endM=today.getMonth()+12;
+  const endY=today.getFullYear()+Math.floor((today.getMonth()+12)/12);
+  const endAdjM=endM%12;
+  // default = próximo mês
+  const defM=(today.getMonth()+1)%12;
+  const defY=today.getMonth()===11?today.getFullYear()+1:today.getFullYear();
+  const defVal=`${defY}-${String(defM+1).padStart(2,'0')}`;
   sel.innerHTML='';
-  for(let i=0;i<12;i++){
-    const m=(defAdjM+i)%12;
-    const y=defY+Math.floor((defAdjM+i)/12);
+  let y=startFixed.y,m=startFixed.m;
+  while(y<endY||(y===endY&&m<=endAdjM)){
     const val=`${y}-${String(m+1).padStart(2,'0')}`;
-    const label=`${MONTHS_PT[m]} ${y}`;
     const opt=document.createElement('option');
-    opt.value=val;opt.textContent=label;
-    if(i===0)opt.selected=true;
+    opt.value=val;opt.textContent=`${MONTHS_PT[m]} ${y}`;
+    if(val===defVal)opt.selected=true;
     sel.appendChild(opt);
+    m++;if(m>11){m=0;y++;}
   }
 }
 function renderCatGrid(){
