@@ -150,6 +150,13 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
 .cc-casa{background:#F1EFE8}.cc-roupas{background:#FBEAF0}.cc-educacao{background:#E6F1FB}
 .cc-assinaturas{background:#EEEDFE}.cc-outros{background:#f5f5f3}
 
+/* PAID FIXED ROW */
+.row-paid{background:var(--green-bg);border-radius:var(--radius-sm);transition:background .2s}
+.row-paid .row-name,.row-paid .row-sub{color:var(--green-text)!important}
+.row-paid .row-val{color:var(--green-text)!important}
+.paid-check{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--border2);background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;transition:all .15s;color:transparent}
+.paid-check.paid{background:var(--green);border-color:var(--green);color:#fff}
+
 /* ANALYSIS TOGGLE */
 .seg-ctrl{display:flex;border:0.5px solid var(--border2);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px}
 .seg-btn{flex:1;padding:8px;font-size:13px;border:none;background:none;color:var(--text2);cursor:pointer}
@@ -966,11 +973,14 @@ function renderPlanning(){
   </div>`).join('');
 
   // fixed
+  const paidSet=new Set(md.paidFixed||[]);
   const fl=document.getElementById('plan-fixed-list');
   fl.innerHTML=md.fixed.map((f,i)=>{
     const fc=FIXED_CATS.find(c=>c.id===f.cat)||{name:'Outros'};
-    return`<div class="row">
-      <div><div class="row-name">${f.name}</div><div class="row-sub">${fc.name}</div></div>
+    const paid=paidSet.has(f.id);
+    return`<div class="row${paid?' row-paid':''}" id="fixrow-${f.id}">
+      <button class="paid-check${paid?' paid':''}" onclick="togglePaidFixed('${f.id}')" title="${paid?'Marcar como não pago':'Marcar como pago'}">✓</button>
+      <div style="flex:1;margin-left:10px"><div class="row-name">${f.name}</div><div class="row-sub">${fc.name}</div></div>
       <div class="row-val">${fmt(f.value)}</div>
       <button class="row-action" onclick="editFixed(${i})">editar</button>
     </div>`;
@@ -1094,6 +1104,14 @@ function saveFixed(i){
   save();closeModal();renderPlanning();
 }
 function removeFixed(i){cmd().fixed.splice(i,1);save();closeModal();renderPlanning();}
+function togglePaidFixed(fid){
+  const md=cmd();
+  if(!md.paidFixed)md.paidFixed=[];
+  const idx=md.paidFixed.indexOf(fid);
+  if(idx>=0)md.paidFixed.splice(idx,1);
+  else md.paidFixed.push(fid);
+  save();renderPlanning();
+}
 
 function openAddFixed(){
   openModal('Nova saída fixa',`
