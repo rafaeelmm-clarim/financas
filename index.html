@@ -150,6 +150,15 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
 .cc-casa{background:#F1EFE8}.cc-roupas{background:#FBEAF0}.cc-educacao{background:#E6F1FB}
 .cc-assinaturas{background:#EEEDFE}.cc-outros{background:#f5f5f3}
 
+/* DRAG & DROP */
+.drag-handle{width:24px;height:36px;display:flex;align-items:center;justify-content:center;cursor:grab;flex-shrink:0;color:var(--text3);touch-action:none;user-select:none;-webkit-user-select:none}
+.drag-handle:active{cursor:grabbing}
+.drag-handle svg{pointer-events:none}
+.row-dragging{opacity:0;pointer-events:none}
+.row-drag-ghost{position:fixed;z-index:999;pointer-events:none;background:var(--bg);border:1px solid var(--blue);border-radius:var(--radius-sm);box-shadow:0 8px 24px rgba(0,0,0,.18);opacity:.95;left:0;top:0;max-width:430px;width:calc(100% - 32px)}
+.row-drop-above{border-top:2px solid var(--blue)!important}
+.row-drop-below{border-bottom:2px solid var(--blue)!important}
+
 /* PAID FIXED ROW */
 .row-paid{background:var(--green-bg);border-radius:var(--radius-sm);transition:background .2s}
 .row-paid .row-name,.row-paid .row-sub{color:var(--green-text)!important}
@@ -978,13 +987,15 @@ function renderPlanning(){
   fl.innerHTML=md.fixed.map((f,i)=>{
     const fc=FIXED_CATS.find(c=>c.id===f.cat)||{name:'Outros'};
     const paid=paidSet.has(f.id);
-    return`<div class="row${paid?' row-paid':''}" id="fixrow-${f.id}">
+    return`<div class="row${paid?' row-paid':''}" id="fixrow-${f.id}" data-fid="${f.id}">
+      <span class="drag-handle" data-drag="fixed" data-fid="${f.id}"><svg width="14" height="20" viewBox="0 0 14 20" fill="currentColor"><circle cx="4" cy="4" r="1.5"/><circle cx="10" cy="4" r="1.5"/><circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="4" cy="16" r="1.5"/><circle cx="10" cy="16" r="1.5"/></svg></span>
       <button class="paid-check${paid?' paid':''}" onclick="togglePaidFixed('${f.id}')" title="${paid?'Marcar como não pago':'Marcar como pago'}">✓</button>
       <div style="flex:1;margin-left:10px"><div class="row-name">${f.name}</div><div class="row-sub">${fc.name}</div></div>
       <div class="row-val">${fmt(f.value)}</div>
       <button class="row-action" onclick="editFixed(${i})">editar</button>
     </div>`;
   }).join('')||'<div class="empty" style="padding:12px 0">Nenhuma saída fixa</div>';
+  initFixedDrag();
 
   // inv
   const il=document.getElementById('plan-inv-list');
@@ -1111,6 +1122,103 @@ function togglePaidFixed(fid){
   if(idx>=0)md.paidFixed.splice(idx,1);
   else md.paidFixed.push(fid);
   save();renderPlanning();
+}
+
+function initFixedDrag(){
+  const container=document.getElementById('plan-fixed-list');
+  let ghost=null,srcFid=null,srcEl=null,lastTarget=null,lastPos=null;
+
+  function getRowEls(){return Array.from(container.querySelectorAll('.row[data-fid]'));}
+
+  function createGhost(el,x,y){
+    const r=el.getBoundingClientRect();
+    const g=el.cloneNode(true);
+    g.className=g.className+' row-drag-ghost';
+    g.style.width=r.width+'px';
+    g.style.height=r.height+'px';
+    g.style.transform=`translate(${r.left}px,${r.top}px)`;
+    document.body.appendChild(g);
+    return g;
+  }
+  function moveGhost(g,dx,dy){
+    const r=srcEl.getBoundingClientRect();
+    g.style.transform=`translate(${r.left+dx}px,${r.top+dy}px)`;
+  }
+  function clearIndicators(){
+    getRowEls().forEach(r=>{r.classList.remove('row-drop-above','row-drop-below');});
+  }
+  function getTargetRow(y){
+    let best=null,bestPos=null;
+    getRowEls().forEach(r=>{
+      if(r===srcEl)return;
+      const rb=r.getBoundingClientRect();
+      const mid=rb.top+rb.height/2;
+      if(y<mid){if(!best||rb.top<best.getBoundingClientRect().top){best=r;bestPos='above';}}
+      else{if(!best||rb.top>best.getBoundingClientRect().top){best=r;bestPos='below';}}
+    });
+    // pick nearest
+    let nearest=null,nearestPos=null,nearestDist=Infinity;
+    getRowEls().forEach(r=>{
+      if(r===srcEl)return;
+      const rb=r.getBoundingClientRect();
+      const mid=rb.top+rb.height/2;
+      const dist=Math.abs(y-mid);
+      if(dist<nearestDist){nearestDist=dist;nearest=r;nearestPos=y<mid?'above':'below';}
+    });
+    return{el:nearest,pos:nearestPos};
+  }
+
+  container.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('[data-drag="fixed"]');
+    if(!handle)return;
+    e.preventDefault();
+    srcFid=handle.dataset.fid;
+    srcEl=container.querySelector(`[data-fid="${srcFid}"]`);
+    if(!srcEl)return;
+    const startX=e.clientX,startY=e.clientY;
+    let moved=false,offX=0,offY=0;
+
+    function onMove(ev){
+      const dx=ev.clientX-startX,dy=ev.clientY-startY;
+      if(!moved&&Math.abs(dy)<4)return;
+      if(!moved){
+        moved=true;
+        ghost=createGhost(srcEl,startX,startY);
+        srcEl.classList.add('row-dragging');
+      }
+      offX=dx;offY=dy;
+      moveGhost(ghost,dx,dy);
+      clearIndicators();
+      const t=getTargetRow(ev.clientY);
+      if(t.el){t.el.classList.add(t.pos==='above'?'row-drop-above':'row-drop-below');lastTarget=t.el;lastPos=t.pos;}
+      else{lastTarget=null;}
+    }
+    function onUp(){
+      document.removeEventListener('pointermove',onMove);
+      document.removeEventListener('pointerup',onUp);
+      if(ghost){ghost.remove();ghost=null;}
+      clearIndicators();
+      srcEl.classList.remove('row-dragging');
+      if(moved&&lastTarget&&srcFid){
+        // reorder in data
+        const md=cmd();
+        const arr=md.fixed;
+        const fromIdx=arr.findIndex(f=>f.id===srcFid);
+        const toId=lastTarget.dataset.fid;
+        let toIdx=arr.findIndex(f=>f.id===toId);
+        if(fromIdx<0||toIdx<0){srcFid=null;return;}
+        const [item]=arr.splice(fromIdx,1);
+        toIdx=arr.findIndex(f=>f.id===toId);
+        if(lastPos==='above')arr.splice(toIdx,0,item);
+        else arr.splice(toIdx+1,0,item);
+        save();renderPlanning();
+      }
+      srcFid=null;srcEl=null;lastTarget=null;lastPos=null;
+    }
+    document.addEventListener('pointermove',onMove,{passive:false});
+    document.addEventListener('pointerup',onUp);
+    container.setPointerCapture&&container.setPointerCapture(e.pointerId);
+  },{passive:false});
 }
 
 function openAddFixed(){
