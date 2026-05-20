@@ -644,7 +644,13 @@ function showLoginScreen(msg) {
 function getMonth(y,m){
   const k=`${y}-${m}`;
   if(!S.months[k]){
-    S.months[k]={salary:0,extras:[],fixed:JSON.parse(JSON.stringify(DEFAULT_FIXED)),inv:JSON.parse(JSON.stringify(DEFAULT_INV)),expenses:[],weeks:4};
+    // copia fixas e investimentos do mês anterior, se existir
+    const prevM=m===0?11:m-1;
+    const prevY=m===0?y-1:y;
+    const prevK=`${prevY}-${prevM}`;
+    const prevFixed=S.months[prevK]?JSON.parse(JSON.stringify(S.months[prevK].fixed)):JSON.parse(JSON.stringify(DEFAULT_FIXED));
+    const prevInv=S.months[prevK]?JSON.parse(JSON.stringify(S.months[prevK].inv)):JSON.parse(JSON.stringify(DEFAULT_INV));
+    S.months[k]={salary:0,extras:[],fixed:prevFixed,inv:prevInv,expenses:[],weeks:4};
   }
   return S.months[k];
 }
