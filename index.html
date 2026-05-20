@@ -365,6 +365,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Saídas fixas</div>
   <div class="card card-sm" id="plan-fixed-list"></div>
   <button class="btn btn-sm" onclick="openAddFixed()">+ Nova saída fixa</button>
+  <button class="btn btn-sm" onclick="copyFixedFromPrev()" style="color:var(--text2)">Copiar fixas do mês anterior</button>
 
   <div class="section-title">Investimentos</div>
   <div class="card card-sm" id="plan-inv-list"></div>
@@ -1116,6 +1117,21 @@ function saveFixed(i){
   save();closeModal();renderPlanning();
 }
 function removeFixed(i){cmd().fixed.splice(i,1);save();closeModal();renderPlanning();}
+
+function copyFixedFromPrev(){
+  const y=S.year,m=S.month;
+  const prevM=m===0?11:m-1;
+  const prevY=m===0?y-1:y;
+  const prevK=`${prevY}-${prevM}`;
+  if(!S.months[prevK]||!S.months[prevK].fixed||!S.months[prevK].fixed.length){
+    alert('Mês anterior não tem saídas fixas.');return;
+  }
+  if(!confirm('Substituir as saídas fixas deste mês pelas do mês anterior?'))return;
+  const md=cmd();
+  md.fixed=JSON.parse(JSON.stringify(S.months[prevK].fixed));
+  md.paidFixed=[];
+  save();renderPlanning();
+}
 
 function togglePaidFixed(fid){
   const md=cmd();
