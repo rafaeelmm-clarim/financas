@@ -587,6 +587,19 @@ function logout() {
   _auth.signOut();
 }
 
+
+function cleanInstExpenses(){
+  // Remove lançamentos em expenses que vieram de parcelamentos (instId)
+  // Eles não devem contar como gasto variável pois já aparecem nas parcelas
+  let changed=false;
+  Object.values(S.months).forEach(md=>{
+    if(!md.expenses)return;
+    const before=md.expenses.length;
+    md.expenses=md.expenses.filter(e=>!e.instId);
+    if(md.expenses.length!==before)changed=true;
+  });
+  if(changed)save();
+}
 async function initApp() {
   document.getElementById('app-loading').style.display = 'flex';
   document.getElementById('app-content').style.display = 'none';
@@ -620,10 +633,12 @@ async function initApp() {
           await fbSet(S);
         }
       }
+      cleanInstExpenses();
       setStatus('✓ Online', 'green');
     } catch(e) {
       const cache = localStorage.getItem('fin2_cache') || localStorage.getItem('fin2');
       if (cache) { try { S = JSON.parse(cache); } catch(e2){} }
+      cleanInstExpenses();
       setStatus('⚠ Offline (cache local)', 'red');
     }
 
@@ -887,12 +902,6 @@ function saveExpense(){
     }
     const instId='inst_'+Date.now();
     S.installments.push({id:instId,desc,cat,total:n,payments});
-    // só registra gasto no mês atual se a 1ª parcela for o mês atual ou futuro
-    const curMk=`${S.year}-${String(S.month+1).padStart(2,'0')}`;
-    const firstFuture=payments.find(p=>p.mk>=curMk);
-    if(firstFuture&&firstFuture.mk===curMk){
-      md.expenses.push({id:'e'+Date.now(),value:firstFuture.v,desc:`${desc} (1/${n})`,cat,date,instId});
-    }
   } else {
     md.expenses.push({id:'e'+Date.now(),value,desc,cat,date});
   }
