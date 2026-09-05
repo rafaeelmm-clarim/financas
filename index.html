@@ -79,6 +79,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .b-blue{background:var(--blue-bg);color:var(--blue-text)}
 .b-purple{background:var(--purple-bg);color:var(--purple-text)}
 .empty{text-align:center;padding:32px 20px;color:var(--text3);font-size:13px}
+.warn-box{background:var(--amber-bg);color:var(--amber-text);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;line-height:1.45}
 
 /* INPUTS */
 input,select,textarea{width:100%;padding:10px 12px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);font-size:15px;background:var(--bg);color:var(--text);appearance:none;-webkit-appearance:none}
@@ -250,6 +251,8 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Fixas por categoria</div>
   <div class="card card-sm" id="home-fixed-cats" style="margin-bottom:12px"></div>
 
+  <div id="week-warn"></div>
+
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div>
@@ -312,7 +315,8 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
 
   <div class="field">
     <label>Data</label>
-    <input type="date" id="add-date">
+    <input type="date" id="add-date" onchange="updAddWeekHint()">
+    <div id="add-week-hint" style="font-size:12px;color:var(--text2);margin-top:5px"></div>
   </div>
 
   <div class="card card-sm" style="margin-bottom:14px">
@@ -336,6 +340,7 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
 <div class="page" id="page-history">
   <div style="font-size:19px;font-weight:500;margin-bottom:12px">Gastos</div>
   <div class="week-pills" id="week-pills"></div>
+  <div id="hist-week-range" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
   <div class="field" style="margin-bottom:12px">
     <select id="hist-cat-filter" onchange="renderHistory()">
       <option value="">Todas as categorias</option>
@@ -374,6 +379,24 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
   <div class="section-title">Parcelas ativas neste mês</div>
   <div class="card card-sm" id="plan-inst-list"></div>
 
+  <div class="section-title">Definição das semanas</div>
+  <div class="card card-sm">
+    <div class="row">
+      <div style="flex:1">
+        <div class="row-name">Início da semana 1</div>
+        <div class="row-sub" id="week-start-mode"></div>
+      </div>
+      <div><input type="date" id="week-start" onchange="setWeekStart()" style="width:158px;padding:6px 10px"></div>
+    </div>
+    <div class="row">
+      <div class="row-name" style="color:var(--text2)">Semanas no mês</div>
+      <div><input type="number" id="weeks-n" value="4" min="4" max="5" style="width:64px;text-align:right;padding:6px 10px" onchange="recalc()"></div>
+    </div>
+    <div id="week-cov-warn"></div>
+    <div id="plan-weeks-list"></div>
+    <button class="btn btn-sm" onclick="resetWeekStart()" style="color:var(--text2)">Restaurar padrão automático</button>
+  </div>
+
   <div id="caixinha-card"></div>
   <div class="section-title">Resumo</div>
   <div class="card">
@@ -383,10 +406,6 @@ input:focus,select:focus{outline:2px solid var(--blue);border-color:transparent}
     <div class="row"><div class="row-name" style="color:var(--text2)">Parcelas no cartão</div><div class="row-val" style="color:var(--red)" id="plan-r-inst">R$ 0</div></div>
     <div class="divider"></div>
     <div class="row"><div class="row-name" style="font-weight:500">Livre para gastar</div><div class="row-val" style="font-size:17px" id="plan-r-free">R$ 0</div></div>
-    <div class="row">
-      <div class="row-name" style="color:var(--text2)">Semanas no mês</div>
-      <div><input type="number" id="weeks-n" value="4" min="4" max="5" style="width:64px;text-align:right;padding:6px 10px" onchange="recalc()"></div>
-    </div>
     <div class="row"><div class="row-name" style="font-weight:500">Limite semanal</div><div class="row-val" style="font-size:17px;color:var(--blue)" id="plan-r-weekly">R$ 0</div></div>
   </div>
 </div>
@@ -519,7 +538,6 @@ let addCatSelected='';
 let analysisMode='cat';
 
 // ---- FIREBASE CONFIG ----
-// Cole aqui suas credenciais do Firebase
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCzx0cvx2ydUUoJpeKWuoR7LKZY-rlugTg",
   authDomain: "financas-coio.firebaseapp.com",
@@ -587,10 +605,8 @@ function logout() {
   _auth.signOut();
 }
 
-
 function cleanInstExpenses(){
   // Remove lançamentos em expenses que vieram de parcelamentos (instId)
-  // Eles não devem contar como gasto variável pois já aparecem nas parcelas
   let changed=false;
   Object.values(S.months).forEach(md=>{
     if(!md.expenses)return;
@@ -600,19 +616,18 @@ function cleanInstExpenses(){
   });
   if(changed)save();
 }
+
 async function initApp() {
   document.getElementById('app-loading').style.display = 'flex';
   document.getElementById('app-content').style.display = 'none';
   document.getElementById('login-screen').style.display = 'none';
 
-  // Inicializa Firebase
   if (!firebase.apps.length) {
     firebase.initializeApp(FIREBASE_CONFIG);
   }
   _auth = firebase.auth();
   _db = firebase.firestore();
 
-  // Observa estado de autenticação
   _auth.onAuthStateChanged(async (user) => {
     if (!user) {
       document.getElementById('app-loading').style.display = 'none';
@@ -620,7 +635,6 @@ async function initApp() {
       return;
     }
 
-    // Usuário logado — carrega dados
     setStatus('🔄 Carregando…', 'gray');
     try {
       const data = await fbGet();
@@ -660,7 +674,6 @@ function showLoginScreen(msg) {
 function getMonth(y,m){
   const k=`${y}-${m}`;
   if(!S.months[k]){
-    // copia fixas e investimentos do mês anterior, se existir
     const prevM=m===0?11:m-1;
     const prevY=m===0?y-1:y;
     const prevK=`${prevY}-${prevM}`;
@@ -674,17 +687,35 @@ function cmd(){return getMonth(S.year,S.month);}
 
 function fmt(v){return(v<0?'- ':'')+'R$ '+Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
+// ---- DATAS / SEMANAS ----
+const DAY_MS=86400000;
+function ymd(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function parseYmd(s){const[a,b,c]=s.split('-').map(Number);return new Date(a,b-1,c);}
+function dayOnly(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();}
+function fdl(d){return`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;}
+function mondayOf(d){
+  const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const back=x.getDay()===0?6:x.getDay()-1;
+  x.setDate(x.getDate()-back);
+  return x;
+}
+// Padrão automático: segunda-feira da semana que contém o dia 1º do mês
+function defaultWeekStart(y,m){return mondayOf(new Date(y,m,1));}
+function weekStartDate(y,m){
+  const md=getMonth(y,m);
+  if(md.weekStart){
+    const d=parseYmd(md.weekStart);
+    if(!isNaN(d.getTime()))return d;
+  }
+  return defaultWeekStart(y,m);
+}
 function getWeeks(y,m){
-  // Encontra a primeira segunda-feira do mês
-  const firstDay=new Date(y,m,1);
-  const dow=firstDay.getDay(); // 0=dom,1=seg,...
-  const daysToMon=dow===1?0:(dow===0?1:(8-dow));
-  const firstMon=new Date(y,m,1+daysToMon);
+  const s0=weekStartDate(y,m);
   const n=getMonth(y,m).weeks||4;
   const weeks=[];
   for(let i=0;i<n;i++){
-    const s=new Date(firstMon);s.setDate(firstMon.getDate()+i*7);
-    const e=new Date(s);e.setDate(s.getDate()+6);
+    const s=new Date(s0.getFullYear(),s0.getMonth(),s0.getDate()+i*7,0,0,0,0);
+    const e=new Date(s.getFullYear(),s.getMonth(),s.getDate()+6,23,59,59,999);
     weeks.push({s,e});
   }
   return weeks;
@@ -693,10 +724,50 @@ function curWeekIdx(y,m){
   const now=new Date();
   const w=getWeeks(y,m);
   for(let i=0;i<w.length;i++)if(now>=w[i].s&&now<=w[i].e)return i;
-  // se antes da primeira semana, retorna 0; se depois da última, retorna última
-  if(now<w[0].s)return 0;
-  return w.length-1;
+  return -1; // fora de todas as janelas
 }
+// Índice da semana a exibir quando a data atual está fora das janelas
+function fallbackWeekIdx(y,m){
+  const now=new Date();
+  const w=getWeeks(y,m);
+  return now>w[w.length-1].e?w.length-1:0;
+}
+// Busca lançamentos no mês anterior, no atual e no seguinte, para cobrir
+// semanas que atravessam a virada de mês
+function expensesAround(y,m){
+  const out=[];
+  for(let d=-1;d<=1;d++){
+    let mm=m+d,yy=y;
+    if(mm<0){mm=11;yy--;}
+    if(mm>11){mm=0;yy++;}
+    const md=S.months[`${yy}-${mm}`];
+    if(md&&md.expenses)out.push(...md.expenses);
+  }
+  return out;
+}
+function weekExp(y,m,wi){
+  const w=getWeeks(y,m);
+  if(!w[wi])return[];
+  return expensesAround(y,m).filter(e=>{const d=parseYmd(e.date);return d>=w[wi].s&&d<=w[wi].e;});
+}
+// Localiza um lançamento em qualquer mês
+function findExpense(id){
+  for(const k in S.months){
+    const md=S.months[k];
+    if(!md||!md.expenses)continue;
+    const e=md.expenses.find(x=>x.id===id);
+    if(e)return{md,e};
+  }
+  return null;
+}
+// Qual semana do mês selecionado contém uma data
+function weekIdxForDate(y,m,dateStr){
+  const d=parseYmd(dateStr);
+  const w=getWeeks(y,m);
+  for(let i=0;i<w.length;i++)if(d>=w[i].s&&d<=w[i].e)return i;
+  return -1;
+}
+
 function instForMonth(y,m){
   const k=`${y}-${String(m+1).padStart(2,'0')}`;
   return S.installments.reduce((a,i)=>a+i.payments.filter(p=>p.mk===k).reduce((b,p)=>b+p.v,0),0);
@@ -710,11 +781,6 @@ function calcTotals(y,m){
   const free=inn-fixed-inv-inst;
   const weekly=free/(md.weeks||4);
   return{inn,fixed,inv,inst,free,weekly};
-}
-function weekExp(y,m,wi){
-  const md=getMonth(y,m),w=getWeeks(y,m);
-  if(!w[wi])return[];
-  return(md.expenses||[]).filter(e=>{const d=new Date(e.date+'T00:00:00');return d>=w[wi].s&&d<=w[wi].e;});
 }
 
 // ---- SHOW PAGE ----
@@ -757,10 +823,26 @@ function renderHome(){
   }).join('');
   document.getElementById('home-fixed-cats').innerHTML=catRows||'<div class="empty">Sem saídas fixas</div>';
 
-  const wi=curWeekIdx(y,m),ws=getWeeks(y,m);
+  const ws=getWeeks(y,m);
+  const wiReal=curWeekIdx(y,m);
+  const fora=wiReal<0;
+  const wi=fora?fallbackWeekIdx(y,m):wiReal;
+
+  // aviso: hoje fora de todas as semanas configuradas
+  const ww=document.getElementById('week-warn');
+  if(isCur&&fora){
+    ww.innerHTML=`<div class="warn-box" style="margin-bottom:12px">
+      <strong>Hoje está fora das semanas configuradas.</strong><br>
+      ${fdl(now)} não pertence a nenhuma semana de ${MONTHS[m]} ${y} (a semana 1 começa em ${fdl(ws[0].s)}). Lançamentos deste período não entram no controle semanal.
+      <button class="btn btn-sm" style="margin-top:8px;background:var(--bg);border-color:var(--amber)" onclick="showPage('planning')">Ajustar início da semana 1</button>
+    </div>`;
+  } else {
+    ww.innerHTML='';
+  }
+
   const spent=weekExp(y,m,wi).reduce((a,b)=>a+b.value,0);
   const pct=weekly>0?Math.min((spent/weekly)*100,100):0;
-  document.getElementById('week-badge').textContent=`Semana ${wi+1}`;
+  document.getElementById('week-badge').textContent=`Semana ${wi+1} · ${fdl(ws[wi].s)} a ${fdl(ws[wi].e)}`;
   document.getElementById('week-spent-home').textContent=fmt(spent);
   document.getElementById('week-limit-home').textContent=fmt(weekly);
   const pf=document.getElementById('home-prog');
@@ -776,11 +858,11 @@ function renderHome(){
   ws.forEach((w,i)=>{
     const s2=weekExp(y,m,i).reduce((a,b)=>a+b.value,0);
     const p2=weekly>0?Math.min((s2/weekly)*100,100):0;
-    const active=i===wi&&isCur;
+    const active=isCur&&!fora&&i===wi;
     wh.innerHTML+=`<div class="card card-sm" style="margin-bottom:8px${active?';border-color:var(--blue)':''}">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px">
         <span style="font-size:13px;${active?'color:var(--blue);font-weight:500':'color:var(--text)'}">Semana ${i+1}</span>
-        <span style="font-size:11px;color:var(--text2)">${fd(w.s)} – ${fd(w.e)}</span>
+        <span style="font-size:11px;color:var(--text2)">${fdl(w.s)} a ${fdl(w.e)}</span>
       </div>
       <div class="progress-bg"><div class="progress-fill ${p2<70?'p-ok':p2<90?'p-warn':'p-over'}" style="width:${p2.toFixed(1)}%"></div></div>
       <div class="progress-labels"><span>${fmt(s2)}</span><span>${fmt(weekly)}</span></div>
@@ -817,13 +899,41 @@ function changeMonth(dir){
 function renderAdd(){
   KP_CENTS=0;updDisplay();
   document.getElementById('add-desc').value='';
-  document.getElementById('add-date').value=new Date().toISOString().split('T')[0];
+  document.getElementById('add-date').value=ymd(new Date());
   addCatSelected='';
   renderCatGrid();
   if(document.getElementById('tog-inst').classList.contains('on'))togInst();
   document.getElementById('add-inst-n').value='';
   document.getElementById('add-inst-v').value='';
   populateInstStart();
+  updAddWeekHint();
+}
+// Mostra em qual mês e semana o lançamento vai cair
+function updAddWeekHint(){
+  const el=document.getElementById('add-week-hint');
+  if(!el)return;
+  const date=document.getElementById('add-date').value;
+  if(!date){el.textContent='';return;}
+  const d=parseYmd(date);
+  const ty=d.getFullYear(),tm=d.getMonth();
+  const wi=weekIdxForDate(ty,tm,date);
+  if(wi>=0){
+    const w=getWeeks(ty,tm)[wi];
+    el.innerHTML=`Entra em <strong>${MONTHS[tm]} ${ty}</strong>, semana ${wi+1} (${fdl(w.s)} a ${fdl(w.e)}).`;
+    el.style.color='var(--text2)';
+    return;
+  }
+  // tenta o mês anterior, cuja última semana pode se estender
+  const py=tm===0?ty-1:ty,pm=tm===0?11:tm-1;
+  const pwi=weekIdxForDate(py,pm,date);
+  if(pwi>=0){
+    const w=getWeeks(py,pm)[pwi];
+    el.innerHTML=`Entra em <strong>${MONTHS[tm]} ${ty}</strong>, dentro da semana ${pwi+1} de ${MONTHS[pm]} (${fdl(w.s)} a ${fdl(w.e)}).`;
+    el.style.color='var(--text2)';
+    return;
+  }
+  el.innerHTML=`⚠ Esta data não pertence a nenhuma semana configurada. Ajuste o início da semana 1 em Planejar.`;
+  el.style.color='var(--amber)';
 }
 function kp(k){
   if(k==='del'){KP_CENTS=Math.floor(KP_CENTS/10);}
@@ -831,7 +941,6 @@ function kp(k){
   else{const n=parseInt(k);KP_CENTS=KP_CENTS*10+n;}
   if(KP_CENTS>9999999)KP_CENTS=Math.floor(KP_CENTS/10);
   updDisplay();
-  // auto fill parcela
   const ni=document.getElementById('add-inst-n'),vi=document.getElementById('add-inst-v');
   if(ni.value&&parseFloat(ni.value)>1){vi.value=(KP_CENTS/100/parseFloat(ni.value)).toFixed(2);}
 }
@@ -848,14 +957,11 @@ function togInst(){
 }
 function populateInstStart(){
   const sel=document.getElementById('add-inst-start');
-  const MONTHS_PT=['Janeiro','Fevereiro','ço','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  // range: Oct/2025 até 12 meses à frente
   const startFixed={y:2025,m:9}; // outubro = índice 9
   const today=new Date();
   const endM=today.getMonth()+12;
   const endY=today.getFullYear()+Math.floor((today.getMonth()+12)/12);
   const endAdjM=endM%12;
-  // default = próximo mês
   const defM=(today.getMonth()+1)%12;
   const defY=today.getMonth()===11?today.getFullYear()+1:today.getFullYear();
   const defVal=`${defY}-${String(defM+1).padStart(2,'0')}`;
@@ -864,7 +970,7 @@ function populateInstStart(){
   while(y<endY||(y===endY&&m<=endAdjM)){
     const val=`${y}-${String(m+1).padStart(2,'0')}`;
     const opt=document.createElement('option');
-    opt.value=val;opt.textContent=`${MONTHS_PT[m]} ${y}`;
+    opt.value=val;opt.textContent=`${MONTHS[m]} ${y}`;
     if(val===defVal)opt.selected=true;
     sel.appendChild(opt);
     m++;if(m>11){m=0;y++;}
@@ -886,7 +992,6 @@ function saveExpense(){
   if(!desc){alert('Informe uma descrição');return;}
   if(!cat){alert('Selecione uma categoria');return;}
   if(!date){alert('Informe a data');return;}
-  const md=cmd();
   if(isInst){
     const n=parseInt(document.getElementById('add-inst-n').value)||0;
     if(n<2){alert('Mínimo 2 parcelas');return;}
@@ -903,7 +1008,11 @@ function saveExpense(){
     const instId='inst_'+Date.now();
     S.installments.push({id:instId,desc,cat,total:n,payments});
   } else {
-    md.expenses.push({id:'e'+Date.now(),value,desc,cat,date});
+    // grava no mês da DATA do lançamento, não no mês selecionado no cabeçalho
+    const d=parseYmd(date);
+    const tgt=getMonth(d.getFullYear(),d.getMonth());
+    if(!tgt.expenses)tgt.expenses=[];
+    tgt.expenses.push({id:'e'+Date.now(),value,desc,cat,date});
   }
   save();showPage('home');
 }
@@ -933,19 +1042,19 @@ function renderHistory(){
   pp.innerHTML=`<button class="wpill${histWeek==='all'?' active':''}" onclick="setHistWeek('all')">Todas</button>`;
   ws.forEach((_,i)=>pp.innerHTML+=`<button class="wpill${histWeek===i?' active':''}" onclick="setHistWeek(${i})">Sem. ${i+1}</button>`);
 
-  // filter
+  const rangeEl=document.getElementById('hist-week-range');
+  rangeEl.textContent=histWeek==='all'?`Todos os lançamentos de ${MONTHS[m]} ${y}`:`Semana ${histWeek+1}: ${fdl(ws[histWeek].s)} a ${fdl(ws[histWeek].e)}`;
+
   const cf=document.getElementById('hist-cat-filter');
   const cv=cf.value;
   cf.innerHTML='<option value="">Todas as categorias</option>';
   S.cats.forEach(c=>cf.innerHTML+=`<option value="${c.id}">${c.icon} ${c.name}</option>`);
   cf.value=cv;
 
-  let exps=[...(md.expenses||[])];
-  if(histWeek!=='all'){
-    const w=ws[histWeek];if(w)exps=exps.filter(e=>{const d=new Date(e.date+'T00:00:00');return d>=w.s&&d<=w.e;});
-  }
+  // "Todas" = lançamentos do mês; semana = filtro por data, cobrindo virada de mês
+  let exps=histWeek==='all'?[...(md.expenses||[])]:weekExp(y,m,histWeek);
   if(cv)exps=exps.filter(e=>e.cat===cv);
-  exps.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  exps.sort((a,b)=>parseYmd(b.date)-parseYmd(a.date));
 
   const list=document.getElementById('hist-list');
   if(!exps.length){list.innerHTML='<div class="empty">Nenhum gasto encontrado</div>';
@@ -960,7 +1069,6 @@ function renderHistory(){
     }).join('')+'</div>';
   }
 
-  // cat totals
   const tots={};exps.forEach(e=>tots[e.cat]=(tots[e.cat]||0)+e.value);
   const srt=Object.entries(tots).sort((a,b)=>b[1]-a[1]);
   const max=srt[0]?.[1]||1;
@@ -977,7 +1085,7 @@ function renderHistory(){
   }).join('')+'</div>':'';
 }
 function setHistWeek(w){histWeek=w;renderHistory();}
-function fmtDate(s){if(!s)return'';const d=new Date(s+'T00:00:00');return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});}
+function fmtDate(s){if(!s)return'';const d=parseYmd(s);return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});}
 
 // ---- PLANNING ----
 function renderPlanning(){
@@ -985,14 +1093,12 @@ function renderPlanning(){
   document.getElementById('plan-month-label').textContent=`${MONTHS[m]} ${y}`;
   document.getElementById('plan-salary-val').textContent=fmt(md.salary);
 
-  // extras
   const el=document.getElementById('plan-extra-list');
   el.innerHTML=(md.extras||[]).map((e,i)=>`<div class="row">
     <div class="row-name">${e.name}</div><div class="row-val">${fmt(e.value)}</div>
     <button class="row-action" onclick="removeExtra(${i})">remover</button>
   </div>`).join('');
 
-  // fixed
   const paidSet=new Set(md.paidFixed||[]);
   const fl=document.getElementById('plan-fixed-list');
   fl.innerHTML=md.fixed.map((f,i)=>{
@@ -1008,14 +1114,12 @@ function renderPlanning(){
   }).join('')||'<div class="empty" style="padding:12px 0">Nenhuma saída fixa</div>';
   initFixedDrag();
 
-  // inv
   const il=document.getElementById('plan-inv-list');
   il.innerHTML=md.inv.map((inv,i)=>`<div class="row">
     <div class="row-name">${inv.name}</div><div class="row-val">${fmt(inv.value)}</div>
     <button class="row-action" onclick="editInv(${i})">editar</button>
   </div>`).join('')||'<div class="empty" style="padding:12px 0">Nenhum investimento</div>';
 
-  // installments
   const mk=`${y}-${String(m+1).padStart(2,'0')}`;
   const ai=S.installments.filter(i=>i.payments.some(p=>p.mk===mk));
   const pl=document.getElementById('plan-inst-list');
@@ -1027,6 +1131,64 @@ function renderPlanning(){
   document.getElementById('weeks-n').value=md.weeks||4;
   recalc();
 }
+
+// ---- CONFIGURAÇÃO DAS SEMANAS ----
+function setWeekStart(){
+  const inp=document.getElementById('week-start');
+  const v=inp.value;
+  const md=cmd();
+  if(!v){delete md.weekStart;save();renderPlanning();return;}
+  let d=parseYmd(v);
+  if(isNaN(d.getTime())){renderWeeksConfig();return;}
+  if(d.getDay()!==1){
+    d=mondayOf(d);
+    alert('O início da semana precisa ser uma segunda-feira.\nAjustado para '+fdl(d)+'.');
+  }
+  md.weekStart=ymd(d);
+  save();renderPlanning();
+}
+function resetWeekStart(){
+  const md=cmd();
+  delete md.weekStart;
+  save();renderPlanning();
+}
+function coverageWarn(y,m){
+  const ws=getWeeks(y,m);
+  const pm=m===0?11:m-1,py=m===0?y-1:y;
+  const nm=m===11?0:m+1,ny=m===11?y+1:y;
+  const prev=getWeeks(py,pm),next=getWeeks(ny,nm);
+  const msgs=[];
+  const gPrev=Math.round((dayOnly(ws[0].s)-dayOnly(prev[prev.length-1].e))/DAY_MS);
+  if(gPrev>1)msgs.push(`${gPrev-1} dia(s) sem semana entre o fim de ${MONTHS[pm]} (${fdl(prev[prev.length-1].e)}) e o início da semana 1 (${fdl(ws[0].s)}).`);
+  if(gPrev<1)msgs.push(`Sobreposição de ${1-gPrev} dia(s) com a última semana de ${MONTHS[pm]}.`);
+  const gNext=Math.round((dayOnly(next[0].s)-dayOnly(ws[ws.length-1].e))/DAY_MS);
+  if(gNext>1)msgs.push(`${gNext-1} dia(s) sem semana entre o fim da semana ${ws.length} (${fdl(ws[ws.length-1].e)}) e o início de ${MONTHS[nm]} (${fdl(next[0].s)}).`);
+  if(gNext<1)msgs.push(`Sobreposição de ${1-gNext} dia(s) com a primeira semana de ${MONTHS[nm]}.`);
+  if(!msgs.length)return'';
+  return`<div class="warn-box" style="margin:8px 0">${msgs.join('<br>')}</div>`;
+}
+function renderWeeksConfig(){
+  const inp=document.getElementById('week-start');
+  if(!inp)return;
+  const y=S.year,m=S.month,md=getMonth(y,m);
+  const s0=weekStartDate(y,m);
+  inp.value=ymd(s0);
+  const auto=defaultWeekStart(y,m);
+  document.getElementById('week-start-mode').textContent=md.weekStart
+    ?`Definido manualmente (padrão seria ${fdl(auto)})`
+    :'Padrão automático: segunda-feira da semana do dia 1º';
+  const ws=getWeeks(y,m);
+  const today=new Date();
+  document.getElementById('plan-weeks-list').innerHTML=ws.map((w,i)=>{
+    const isNow=today>=w.s&&today<=w.e;
+    return`<div class="row" style="padding:6px 0">
+      <div class="row-name" style="font-size:13px${isNow?';color:var(--blue);font-weight:500':''}">Semana ${i+1}${isNow?' (atual)':''}</div>
+      <div class="row-sub">${fdl(w.s)} a ${fdl(w.e)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('week-cov-warn').innerHTML=coverageWarn(y,m);
+}
+
 function recalc(){
   const y=S.year,m=S.month,md=getMonth(y,m);
   md.weeks=parseInt(document.getElementById('weeks-n').value)||4;
@@ -1038,9 +1200,11 @@ function recalc(){
   const fe=document.getElementById('plan-r-free');fe.textContent=fmt(free);fe.style.color=free>=0?'var(--green)':'var(--red)';
   document.getElementById('plan-r-weekly').textContent=fmt(weekly);
 
+  renderWeeksConfig();
+
   // caixinha — gastos variáveis do mês anterior
   const caixEl=document.getElementById('caixinha-card');
-  const prevM=y*12+m===0?11:(m===0?11:m-1);
+  const prevM=m===0?11:m-1;
   const prevY2=m===0?y-1:y;
   const prevMd=getMonth(prevY2,prevM);
   const prevSpent=(prevMd.expenses||[]).reduce((a,b)=>a+b.value,0);
@@ -1301,7 +1465,6 @@ function renderAmanda(){
   document.getElementById('amanda-pct-lbl').textContent=pct;
   document.getElementById('amanda-pct-lbl2').textContent=pct;
 
-  // pool list = fixed expenses (checkable)
   const poolSel=S.amanda.poolSelected||[];
   const pl=document.getElementById('amanda-pool-list');
   pl.innerHTML=md.fixed.map(f=>{
@@ -1313,7 +1476,6 @@ function renderAmanda(){
     </div>`;
   }).join('')||'<div class="empty">Adicione saídas fixas no planejamento</div>';
 
-  // direct list = also from fixed (different selection)
   const dirSel=S.amanda.directSelected||[];
   const dl=document.getElementById('amanda-direct-list');
   dl.innerHTML=md.fixed.map(f=>{
@@ -1380,10 +1542,9 @@ function renderAnalysis(){
   else if(analysisMode==='fixed'){renderFixedAnalysis(months);}
   else{renderTypeAnalysis(months);}
 
-  // Current month stats
   const{inn,fixed,inv,inst,free}=calcTotals(S.year,S.month);
   const md=getMonth(S.year,S.month);
-  const totalSpent=md.expenses.reduce((a,b)=>a+b.value,0);
+  const totalSpent=(md.expenses||[]).reduce((a,b)=>a+b.value,0);
   const pctComm=inn>0?((fixed+inv+inst)/inn*100):0;
   const sg=document.getElementById('analysis-stats');
   sg.innerHTML=`
@@ -1393,7 +1554,6 @@ function renderAnalysis(){
     <div class="stat"><div class="stat-label">Livre para gastar</div><div class="stat-value" style="color:${free>=0?'var(--green)':'var(--red)'}">${fmt(free)}</div></div>
   `;
 
-  // Future committed
   const fc=document.getElementById('future-committed');
   const futMonths=[];
   for(let i=1;i<=4;i++){
@@ -1499,7 +1659,6 @@ function renderFixedAnalysis(months){
     const c=S.cats.find(c=>c.id===cid)||{name:cid,icon:'📦'};
     return`<span style="display:flex;align-items:center;gap:4px;font-size:12px"><span style="width:10px;height:10px;border-radius:2px;background:${catColorMap[cid]};display:inline-block"></span>${c.icon} ${c.name}</span>`;
   }).join('');
-  // Mês atual: breakdown por categoria com % da receita
   const sg=document.getElementById('analysis-stats');
   const curFixed=getMonth(S.year,S.month).fixed||[];
   const {inn}=calcTotals(S.year,S.month);
@@ -1545,12 +1704,12 @@ function renderTypeAnalysis(months){
 
 // ---- EDIT EXPENSE ----
 function editExpense(id){
-  const md=cmd();
-  const e=md.expenses.find(e=>e.id===id);
-  if(!e)return;
+  const found=findExpense(id);
+  if(!found)return;
+  const e=found.e;
   window._editId=id;
   window._editCents=Math.round(e.value*100);
-  const catGrid=S.cats.map(c=>`<button class="cat-pill${e.cat===c.id?' selected':''}" id="ec-cat-${c.id}" onclick="selEditCat('${c.id}')""><span class="ci">${c.icon}</span>${c.name}</button>`).join('');
+  const catGrid=S.cats.map(c=>`<button class="cat-pill${e.cat===c.id?' selected':''}" id="ec-cat-${c.id}" onclick="selEditCat('${c.id}')"><span class="ci">${c.icon}</span>${c.name}</button>`).join('');
   openModal('Editar lançamento',`
     <div class="num-display"><div class="prefix">R$</div><div class="amount" id="ec-display">${e.value.toLocaleString('pt-BR',{minimumFractionDigits:2})}</div></div>
     <div class="keypad">${[1,2,3,4,5,6,7,8,9,'00',0,'del'].map(k=>`<button class="key" onclick="ecKp('${k}')">${k==='del'?'⌫':k}</button>`).join('')}</div>
@@ -1575,9 +1734,9 @@ function selEditCat(id){
   document.getElementById('ec-cat-'+id)?.classList.add('selected');
 }
 function saveEditExpense(){
-  const md=cmd();
-  const e=md.expenses.find(e=>e.id===window._editId);
-  if(!e)return;
+  const found=findExpense(window._editId);
+  if(!found)return;
+  const{md,e}=found;
   const desc=document.getElementById('ec-desc').value.trim();
   const date=document.getElementById('ec-date').value;
   if(!desc){alert('Informe uma descrição');return;}
@@ -1586,18 +1745,28 @@ function saveEditExpense(){
   e.value=window._editCents/100;
   e.desc=desc;
   e.cat=window._editCat;
+  const oldDate=e.date;
   e.date=date;
+  // se a data mudou de mês, move o lançamento para o bucket correto
+  const od=parseYmd(oldDate),nd=parseYmd(date);
+  if(od.getFullYear()!==nd.getFullYear()||od.getMonth()!==nd.getMonth()){
+    md.expenses=md.expenses.filter(x=>x.id!==e.id);
+    const tgt=getMonth(nd.getFullYear(),nd.getMonth());
+    if(!tgt.expenses)tgt.expenses=[];
+    tgt.expenses.push(e);
+  }
   save();closeModal();renderHistory();
 }
 function deleteExpense(id){
   if(!confirm('Excluir este lançamento?'))return;
-  const md=cmd();
-  const exp=md.expenses.find(e=>e.id===id);
-  if(exp&&exp.instId){
+  const found=findExpense(id);
+  if(!found)return;
+  const{md,e}=found;
+  if(e.instId){
     if(!confirm('Esta compra é parcelada. Excluir também todas as parcelas futuras?'))return;
-    S.installments=S.installments.filter(i=>i.id!==exp.instId);
+    S.installments=S.installments.filter(i=>i.id!==e.instId);
   }
-  md.expenses=md.expenses.filter(e=>e.id!==id);
+  md.expenses=md.expenses.filter(x=>x.id!==id);
   save();closeModal();renderHistory();
 }
 
